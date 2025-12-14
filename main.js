@@ -4,8 +4,10 @@ import { EffectComposer } from "https://unpkg.com/three@0.160.0/examples/jsm/pos
 import { RenderPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js";
 
+let PROTOTYPE_MODE = true;
+let NUM_PARTICLES = 4000;
+let prototypeStarMaterial;
 let galaxyType = "spiral";
-const NUM_PARTICLES = 250000;
 const MAX_WARP_ZOOM = 5;
 
 const hud = document.getElementById("hud");
@@ -51,6 +53,14 @@ function init() {
 
   enableKeyCapture();
 
+  prototypeStarMaterial = new THREE.PointsMaterial({
+    size: 0.06,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.9,
+  });
+
   starMaterial = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -77,7 +87,6 @@ void main() {
 
   vec3 pos = position;
 
-  // ⭐ hyperspace warp streaking (GPU cheap and beautiful)
   pos += u_cameraDir * u_warp * (length(position) * 4.0);
 
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -176,6 +185,7 @@ function regenerateGalaxy() {
   if (points) {
     scene.remove(points);
     points.geometry.dispose();
+    points = null;
   }
 
   const data = generateGalaxy(galaxyType);
@@ -187,9 +197,12 @@ function regenerateGalaxy() {
   );
   geometry.setAttribute("color", new THREE.BufferAttribute(data.colors, 3));
 
-  points = new THREE.Points(geometry, starMaterial);
-  scene.add(points);
+  points = new THREE.Points(
+    geometry,
+    PROTOTYPE_MODE ? prototypeStarMaterial : starMaterial
+  );
 
+  scene.add(points);
   solarSystemActive = false;
 }
 
@@ -410,6 +423,19 @@ function generateDwarfGalaxy(pos, col) {
   }
 }
 
+function onPrototypeToggle(e) {
+  if (e.key.toLowerCase() !== "p") return;
+
+  PROTOTYPE_MODE = !PROTOTYPE_MODE;
+  NUM_PARTICLES = PROTOTYPE_MODE ? 4000 : 250000;
+
+  hud.textContent = PROTOTYPE_MODE ? "Prototype Mode" : "Galaxy Mode";
+  hud.style.opacity = 1;
+
+  regenerateGalaxy();
+}
+window.addEventListener("keydown", onPrototypeToggle);
+
 function onSolarKey(event) {
   if (event.key.toLowerCase() !== "s") return;
   if (solarSystemActive) return;
@@ -433,7 +459,7 @@ function onSolarKey(event) {
     return;
   }
 
-  hud.textContent = "Exploring star system...";
+  hud.textContent = "Exploring solar system...";
   hud.style.opacity = 1;
   spawnSolarSystem(center);
 }
@@ -445,7 +471,7 @@ function onWarpKey(event) {
   const cameraDist = camera.position.distanceTo(controls.target);
 
   if (cameraDist > 18) {
-    hud.textContent = "Zoom in closer to warp into a new galaxy!";
+    hud.textContent = "Press W to warp into a new galaxy!";
     hud.style.opacity = 1;
     return;
   }
@@ -487,10 +513,10 @@ function spawnSolarSystem(center) {
   sunlight.castShadow = false;
   system.add(sunlight);
 
-  const ambientSpace = new THREE.AmbientLight(0xffffff, .5);
+  const ambientSpace = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientSpace);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, .5);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.5);
   scene.add(hemi);
 
   const textureLoader = new THREE.TextureLoader();
@@ -502,16 +528,27 @@ function spawnSolarSystem(center) {
     const orbitRadius = 3 + i * THREE.MathUtils.randFloat(10, 14);
     const size = THREE.MathUtils.randFloat(0.25, 1.25);
 
-    const map = textureLoader.load(
-      `https://picsum.photos/512/512?random=${Math.random()}`
-    );
-
     const geo = new THREE.SphereGeometry(size, 32, 32);
-    const mat = new THREE.MeshStandardMaterial({
-      map,
-      roughness: 0.8,
-      metalness: 0.0,
-    });
+
+    let mat;
+
+    if (PROTOTYPE_MODE) {
+      mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(Math.random(), 0.6, 0.5),
+        roughness: 0.9,
+        metalness: 0.0,
+      });
+    } else {
+      const map = textureLoader.load(
+        `https://picsum.photos/512/512?random=${Math.random()}`
+      );
+
+      mat = new THREE.MeshStandardMaterial({
+        map,
+        roughness: 0.8,
+        metalness: 0.0,
+      });
+    }
 
     const planet = new THREE.Mesh(geo, mat);
     planet.userData.orbitRadius = orbitRadius;
@@ -547,7 +584,6 @@ function spawnSolarSystem(center) {
   controls.target.copy(center);
   camera.position.set(center.x, center.y + 8, center.z + 12);
 }
-
 
 function revertToGalaxy() {
   clearSolarSystem();
@@ -609,7 +645,10 @@ function animate() {
 
   const elapsed = clock.getElapsedTime();
 
-  if (starMaterial) starMaterial.uniforms.u_time.value = elapsed;
+  if (!PROTOTYPE_MODE && starMaterial?.uniforms) {
+    starMaterial.uniforms.u_time.value = elapsed;
+  }
+
   if (points) points.rotation.y += 0.0008;
 
   if (solarSystemActive && currentSolarSystem) {
@@ -669,7 +708,7 @@ function animate() {
       hud.textContent = "Press S to explore a star system!";
       hud.style.opacity = 1;
     } else if (controls.target.length() < 2.5) {
-      hud.textContent = "Zoom closer to warp into a new galaxy!";
+      hud.textContent = "Press W to warp into a new galaxy!";
       hud.style.opacity = 1;
     } else {
       hud.textContent = "Press S to explore this star system!";
